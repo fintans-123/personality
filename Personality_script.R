@@ -11,10 +11,10 @@ library(cowplot)
 
 setwd("C:/Users/fintan.smith/Desktop/Personality/Personality")
 
-df <- read_spss("DP_TuesdayPM_24_01_23_G4 WEIGHTED.sav")
+df <- read_spss("personality.sav")
 
 
-df <- select(df,identity, contains("IPIP"), contains("big_five"))
+df <- select(df,id, contains("IPIP"), contains("big_five"))
 
 
 df <- lapply(df, as.numeric)
