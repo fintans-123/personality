@@ -1,0 +1,320 @@
+---
+title: "Personality traits as a predictor of voting intention"
+author: "Fintan Smith"
+date: '2023-10-01'
+output: html_document
+---
+
+```{r, include=FALSE, echo=FALSE}
+
+library(pacman)
+
+p_load(dplyr, tidyr,sjlabelled, corrplot, foreign,nnet, afex,VGAM,stargazer, Hmisc, ggplot2, MNLpred, tidyverse)
+
+#setwd("C:/Users/fintan.smith/Desktop/Personality/Personality/Personality and VI/files to merge")
+
+df <- read_spss("C:/Users/fintan.smith/Desktop/Personality/Personality/Personality and VI/files to merge/merged_personality.sav")
+
+
+# Tidy up education variable to make ordinal
+df <- df%>%
+  as_numeric(highest_education_gce)%>%
+  mutate(education_clean_ordinal= case_when(
+    highest_education_gce==1 ~ 1,
+    highest_education_gce==2 ~ 98,
+    highest_education_gce==3 ~ 2,
+    highest_education_gce==4 ~ 3,
+    highest_education_gce==5 ~ 4,
+    highest_education_gce==6 ~ 5,
+    highest_education_gce==7 ~ 98,
+    highest_education_gce==8 ~ 98
+  ))%>%
+  mutate(education_clean_ordinal= na_if(education_clean_ordinal,98))
+
+
+```
+
+## Check correlations between personality traits and other predictors
+
+```{r, echo=FALSE}
+
+
+
+
+# Select relevant demographic variables and personality variables to enter into cor matrix
+
+df_demog_checks <- df %>%
+  dplyr::select(age, profile_education_level_recode,profile_gender,contains("update2023"), -contains("xbig_five_update2023_agreeableness"))%>%
+  as_numeric(.)
+
+colnames(df_demog_checks) <- c("Age", "Education level","Gender", "Agreeableness", "Conscientiousness", "Extraversion", "Neuroticism","Openness")
+
+
+# Correlation matrix
+df_demog_checks <- as.matrix(df_demog_checks)
+
+demog_cor_tests <-  cor(df_demog_checks, use="complete.obs")
+
+# Visualise correlation matrix
+corrplot::corrplot(demog_cor_tests, method = "number")
+
+
+
+```
+
+## Multinomial model
+With score on the big five entered as predictors, along with age, gender and education level
+
+```{r, warning=FALSE, echo=FALSE}
+
+# Wrangling for multinomial model
+
+
+# Define 
+multinom_df <- df %>%
+  filter(dpq1==1|dpq1==2|dpq1==3|dpq1==4|dpq1==5|dpq1==6|dpq1==7)%>%
+  filter(!is.na(education_clean_ordinal))%>%
+  as_numeric(big_five_update2023_agreeableness,big_five_update2023_conscientiousness,big_five_update2023_extraversion,
+             big_five_update2023_neuroticism,big_five_update2023_openness)%>%
+  as_numeric(profile_gender) # work around from https://github.com/ManuelNeumann/MNLpred/issues/1 - predicted probabilities not yet possible with factors as predictors
+
+
+# Define voting intention as a factor
+
+multinom_df$dpq1 <- factor(multinom_df$dpq1, levels= c(1,2,3,4,5,6,7), labels= c("Conservative", "Labour", "Lib Dem", "SNP", "Plaid Cymru", "Reform UK", "Green"))
+
+
+
+############################## Multinomial model with age, education level and gender, with Labour as reference group
+
+
+multinom_df$dpq1 <- relevel(multinom_df$dpq1, ref =2)
+
+
+log_mod_with_gen <- multinom(dpq1 ~ big_five_update2023_agreeableness+big_five_update2023_neuroticism+big_five_update2023_conscientiousness+big_five_update2023_extraversion+big_five_update2023_openness+age+education_clean_ordinal+profile_gender,
+                    data= multinom_df,
+                    Hess=TRUE, MaxNWts =10000000, maxit=1000)
+
+
+
+stargazer::stargazer(log_mod_with_gen, ci=T, type= "text")  
+
+
+
+
+
+```
+
+## Visualisations of predicted probabilities of having a voting preference of Labour, Conservative or Liberal Democrat
+
+```{r, echo=FALSE}
+
+
+
+## Openness predicted probabilities
+
+pred_open <- mnl_pred_ova(model= log_mod_with_gen,
+             data=multinom_df,
+             x="big_five_update2023_openness",
+             by=1,
+             nsim=100)
+
+
+## Transform data from long to wide...
+
+open_plot <- pred_open$plotdata
+
+open_plot_wide <- open_plot%>%
+  pivot_wider(id_cols = "big_five_update2023_openness",#
+              names_from= "dpq1",
+              names_sep="_",
+              values_from= c("mean", "lower", "upper"))
+
+
+# Write wide plot data for external charting software
+write.csv(open_plot_wide, "plot_open_probs.csv")
+
+
+open_plot <- open_plot%>%
+  filter(str_detect(dpq1,"Lab")|str_detect(dpq1,"Con")| str_detect(dpq1,"Lib"))
+
+
+
+# GGPLOT
+party_colours <- c("#C20800","#003CAB","#FFBA22")
+
+
+
+# specify openness plot
+ggplot(open_plot, aes(x=big_five_update2023_openness, y=mean, ymin=lower,ymax=upper))+
+  geom_line(aes(color=dpq1))+
+  scale_color_manual(name= "",values= party_colours)+
+  geom_ribbon(aes(color=dpq1), alpha=0.1)+
+  xlab("Openness score")+
+  ylab("Probability")+
+  ggtitle("Predicted probabilities of voting preference being Labour, Conservative or Lib Dem")+
+  theme_light()
+
+
+
+
+
+
+
+## Agreeableness predicted probabilities
+
+pred_agree <- mnl_pred_ova(model= log_mod_with_gen,
+                          data=multinom_df,
+                          x="big_five_update2023_agreeableness",
+                          by=1,
+                          nsim=100)
+
+
+
+
+
+## Move plot data from long to wide...
+
+agreeable_plot <- pred_agree$plotdata
+
+agreeable_plot_wide <- agreeable_plot%>%
+  pivot_wider(id_cols = "big_five_update2023_agreeableness",#
+              names_from= "dpq1",
+              names_sep="_",
+              values_from= c("mean", "lower", "upper"))
+
+write.csv(agreeable_plot_wide, "plot_agreeable_probs.csv")
+
+
+agreeable_plot <- agreeable_plot%>%
+  filter(str_detect(dpq1,"Lab")|str_detect(dpq1,"Con")| str_detect(dpq1,"Lib"))
+
+
+
+
+# specify openness plot
+ggplot(agreeable_plot, aes(x=big_five_update2023_agreeableness, y=mean, ymin=lower,ymax=upper))+
+  geom_line(aes(color=dpq1))+
+  scale_color_manual(name= "",values= party_colours)+
+  geom_ribbon(aes(color=dpq1), alpha=0.1)+
+  xlab("Agreeableness score")+
+  ylab("Probability")+
+  ggtitle("Predicted probabilities of voting preference being Labour, Conservative or Lib Dem")+
+  theme_light()
+
+
+
+## conscientiousness predicted probabilities
+
+pred_conscientiousness <- mnl_pred_ova(model= log_mod_with_gen,
+                           data=multinom_df,
+                           x="big_five_update2023_conscientiousness",
+                           by=1,
+                           nsim=100)
+
+
+
+
+## Move plot data from long to wide...
+
+conscientiousness_plot <- pred_conscientiousness$plotdata
+
+conscientiousness_plot_wide <- conscientiousness_plot%>%
+  pivot_wider(id_cols = "big_five_update2023_conscientiousness",#
+              names_from= "dpq1",
+              names_sep="_",
+              values_from= c("mean", "lower", "upper"))
+
+write.csv(conscientiousness_plot_wide, "plot_conscientiousness_probs.csv")
+
+
+conscientiousness_plot <- conscientiousness_plot%>%
+  filter(str_detect(dpq1,"Lab")|str_detect(dpq1,"Con")| str_detect(dpq1,"Lib"))
+
+
+# specify openness plot
+ggplot(conscientiousness_plot, aes(x=big_five_update2023_conscientiousness, y=mean, ymin=lower,ymax=upper))+
+  geom_line(aes(color=dpq1))+
+  scale_color_manual(name= "",values= party_colours)+
+  geom_ribbon(aes(color=dpq1), alpha=0.1)+
+  xlab("Conscientiousness score")+
+  ylab("Probability")+
+  ggtitle("Predicted probabilities of voting preference being Labour, Conservative or Lib Dem")+
+  theme_light()
+
+## Extraversion predicted probabilities
+
+pred_extraversion <- mnl_pred_ova(model= log_mod_with_gen,
+                           data=multinom_df,
+                           x="big_five_update2023_extraversion",
+                           by=1,
+                           nsim=100)
+
+
+
+## Move plot data from long to wide...
+
+extraversion_plot <- pred_extraversion$plotdata
+
+extraversion_plot_wide <- extraversion_plot%>%
+  pivot_wider(id_cols = "big_five_update2023_extraversion",#
+              names_from= "dpq1",
+              names_sep="_",
+              values_from= c("mean", "lower", "upper"))
+
+write.csv(extraversion_plot_wide, "plot_extraversion_probs.csv")
+
+
+extraversion_plot <- extraversion_plot%>%
+  filter(str_detect(dpq1,"Lab")|str_detect(dpq1,"Con")| str_detect(dpq1,"Lib"))
+
+
+# specify openness plot
+ggplot(extraversion_plot, aes(x=big_five_update2023_extraversion, y=mean, ymin=lower,ymax=upper))+
+  geom_line(aes(color=dpq1))+
+  scale_color_manual(name= "",values= party_colours)+
+  geom_ribbon(aes(color=dpq1), alpha=0.1)+
+  xlab("Extraversion score")+
+  ylab("Probability")+
+  ggtitle("Predicted probabilities of voting preference being Labour, Conservative or Lib Dem")+
+  theme_light()
+
+
+## Neuroticism predicted probabilities
+
+pred_neurotic <- mnl_pred_ova(model= log_mod_with_gen,
+                           data=multinom_df,
+                           x="big_five_update2023_neuroticism",
+                           by=1,
+                           nsim=100)
+
+## Move plot data from long to wide...
+
+neurotic_plot <- pred_neurotic$plotdata
+
+neurotic_plot_wide <- neurotic_plot%>%
+  pivot_wider(id_cols = "big_five_update2023_neuroticism",#
+              names_from= "dpq1",
+              names_sep="_",
+              values_from= c("mean", "lower", "upper"))
+
+write.csv(neurotic_plot_wide, "plot_neuroticism_probs.csv")
+
+
+
+
+neurotic_plot <- neurotic_plot%>%
+  filter(str_detect(dpq1,"Lab")|str_detect(dpq1,"Con")| str_detect(dpq1,"Lib"))
+
+
+# specify openness plot
+ggplot(neurotic_plot, aes(x=big_five_update2023_neuroticism, y=mean, ymin=lower,ymax=upper))+
+  geom_line(aes(color=dpq1))+
+  scale_color_manual(name= "",values= party_colours)+
+  geom_ribbon(aes(color=dpq1), alpha=0.1)+
+  xlab("Neuroticism score")+
+  ylab("Probability")+
+  ggtitle("Predicted probabilities of voting preference being Labour, Conservative or Lib Dem")+
+  theme_light()
+
+```
