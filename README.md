@@ -1,3 +1,5 @@
 # personality
 
-This is a script I wrote to validate the mini-IPIP for use with a nat-rep panel in the UK. The scores for each trait were calculated within the survey itself using code I wrote in python.  
+This repo contains my validation of the mini-ipip on a UK nationally and politically representative sample, along with modelling of personality traits as predictors of current voting intention in the UK. 
+
+
